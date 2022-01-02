@@ -1,0 +1,138 @@
+---
+title: "AIT Final Project"
+author: "Sai Jaswanth Kumar Kunku"
+date: "11/25/2021"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+## Library Import
+```{r,results='hide'}
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(reshape)
+library(plotly)
+library(psych)
+library(corrplot)
+library(ggcorrplot)
+```
+
+```{r}
+spotify_songs <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-01-21/spotify_songs.csv')
+
+write.csv(spotify_songs,"./spotifydata.csv")
+```
+
+#Data Import,cleaning and converting cleaned dataset into CSV for exploration in other platforms(Python,SQL)
+```{r,eval=FALSE}
+df <- read.csv('spotifydata.csv')
+names(df)
+#removing unwanted columns
+df <- df[-c(1,5,6,8,9,11)]
+names(df)
+dim(df)
+summary(df)
+#Finding the Missing values
+missingvalues=colSums(is.na(df))
+missingvalues
+#removing missing values
+df<-na.omit(df)  #Checking duplicates
+sum(duplicated(df)) #We have zero duplicates in the dataset
+#extracting year from the date
+df$track_album_release_date<-as.Date(df$track_album_release_date)
+df$year<-format(as.Date(df$track_album_release_date), "%Y")
+df$year<-as.numeric(df$year)
+df$duration_ms<-df$duration_ms/(1000*60)
+#names(df$duration_ms) <- 'duration(min)'
+#replacing different versions of same song such as edit|remix|remastered|remaster|radio|version|original|mix to eliminate duplicates
+df$track_name<-gsub("\\-.*|\\[.*|\\(.*","",df$track_name)
+#Removing duplicates tracks to get final clean dataset
+unique_rows <- !duplicated(df[c("track_name","track_artist")])
+df <- df[unique_rows,]
+df<-subset(df, year!="NA")
+df<-as.data.frame(df)
+#writing the new dataset
+#write.table(df,"./final.csv",sep=";",row.names=FALSE,fileEncoding = "UTF-8")
+song_features<-df %>% select(year,track_popularity,danceability,energy,key,loudness,mode,speechiness,instrumentalness,acousticness,liveness,valence,tempo)
+```
+
+
+#1. What is the average popularity of tracks that were released during that year?
+```{r}
+year_popularity<-df %>%group_by(year) %>% summarise_at(vars(track_popularity), list(avg_popularity = mean))
+as.data.frame(year_popularity)
+year_popularity%>%plot_ly(x = ~year, y = ~avg_popularity, type = 'scatter', mode = 'lines+markers') %>%
+  layout(title='Average Popularity over the years',xaxis = list(title='Year'),yaxis=list(title='Popularity'))
+```
+#2. How the audio features such as key, mode etc. are distributed and correlated with each other?
+```{r,fig.asp = 0.6,eval=FALSE}
+
+cor(song_features)
+#pairs.panels(song_features)
+
+ggcorrplot(cor(song_features), hc.order = TRUE,show.diag = FALSE,lab=TRUE,insig = "blank",digits = 2,lab_size=3,colors= c("#6D9EC1", "white", "#E46726"))+ 
+  labs(title = "Correlation between Song Features")
+```
+##Predicting popularity based on song_characterstics
+```{r,eval=FALSE}
+lm.mod = lm(track_popularity~instrumentalness+acousticness+liveness+tempo+energy+loudness+
+              danceability+valence+year, data=df);
+summary(lm.mod)
+
+sample=sample(1:nrow(df),size=nrow(df)*.7)
+train<-df[sample,] #Select the 80% of rows
+test<-df[-sample,] #Select the 20% of rows
+#Logistic regression Model on training data
+model<-glm(lm.mod,data=train)
+#Predicting the model on test data
+predicted=predict(model,test)
+
+actuals_preds <- data.frame(cbind(actuals=test$track_popularity, predicteds=predicted))
+
+min_max_accuracy <- mean(apply(actuals_preds, 1, min) / apply(actuals_preds, 1, max)) 
+min_max_accuracy*100
+RMSE(predicted, test$track_popularity)
+
+```
+
+#3. How is the music industry is evolving over the period and mainly in the 21st Century?
+
+```{r,eval=FALSE}
+df %>% group_by(year)  %>% summarise(count = n()) %>% subset(year <= 2019) %>% plot_ly(x = ~year,y = ~count,type = 'scatter',mode='lines+markers')%>%
+layout(title='Song Releases between 1957 and 2020',xaxis = list(title='Year'),yaxis=list(title='No of songs'))
+
+```
+```{r,eval=FALSE}
+plot_zoom_year <- df %>% select(year) %>%group_by(year) %>%summarise(count = n()) %>% subset(year >= 2000)
+plot_zoom_year%>%plot_ly(x = ~year,y = ~count,type = 'scatter',mode='lines+markers')%>%
+  layout(title='Music in 21st Century',xaxis = list(title='Year'),yaxis=list(title='No of songs released'))
+
+```
+
+
+```{r,eval=FALSE}
+y1=song_features%>%subset(year < 2000)
+y2=song_features%>%subset(year >= 2000)
+colMeans(y1[ , 1:ncol(y1)])
+colMeans(y2[ , 1:ncol(y2)])
+```
+
+```{r,eval=FALSE}
+library(ggplot2)
+yeardata=df
+yeardata$Music[df$year < 2000] <- "20th Century"
+yeardata$Music[df$year > 2000] <- "21st Century"
+yeardata<-na.omit(yeardata)
+df3=yeardata %>% group_by(Music,playlist_genre) %>% summarise(count = n())
+ggplot(df3, aes(y=count, x=playlist_genre)) + geom_bar(aes(fill = Music),position = "dodge", stat = "identity")+labs(
+  title="Distribution of Songs in different Genres",
+  x="Genre",
+  y="Count"
+)
+
+
+
+```
+
